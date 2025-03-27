@@ -6,6 +6,9 @@ import fs from 'fs'
 
 export const name = 'jm2pdf'
 
+export const usage = `使用本插件需要安装Python  
+若未安装请在 https://www.python.org 安装并勾选“Add Python to PATH”`
+
 export interface Config {
   cache: boolean
   proxy: string
