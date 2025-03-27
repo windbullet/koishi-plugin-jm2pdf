@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-jm2pdf",
   "description": "通过JM号获取禁漫本子并发送pdf，需要python环境",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
@@ -10,6 +10,11 @@
     "image2pdf"
   ],
   "license": "MIT",
+  "homepage": "https://github.com/windbullet/koishi-plugin-jm2pdf",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/windbullet/koishi-plugin-jm2pdf.git"
+  },
   "keywords": [
     "chatbot",
     "koishi",

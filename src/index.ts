@@ -26,7 +26,7 @@ export const Config: Schema<Config> = Schema.object({
 
 export function apply(ctx: Context, config: Config) {
   fs.rmSync(join(ctx.baseDir, `cache/jmcomic`), { recursive: true, force: true });
-  
+
   const jmConfigPath = join(__dirname, "./../image2pdf/config.yml")
   const jmConfig = parseDocument(fs.readFileSync(jmConfigPath, "utf-8"))
   jmConfig.setIn(["dir_rule", "base_dir"], join(ctx.baseDir, "cache/jmcomic"))
@@ -37,7 +37,8 @@ export function apply(ctx: Context, config: Config) {
   }
   fs.writeFileSync(jmConfigPath, jmConfig.toString())
 
-  ctx.command("jmcomic <id:posint>")
+  ctx.command("jmcomic <id:posint>", "通过JM号获取本子并发送pdf", {checkArgCount: true})
+    .example("jmcomic 366517")
     .action(async ({session}, id) => {
       session.send(h.quote(session.messageId) + "正在下载...")
 
