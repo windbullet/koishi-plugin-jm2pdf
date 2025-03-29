@@ -54,7 +54,7 @@ export const Config: Schema<Config> = Schema.intersect([
 ])
 
 export function apply(ctx: Context, config: Config) {
-  if (!fs.existsSync(config.python)) {
+  if (config.python && !fs.existsSync(config.python)) {
     ctx.logger("jm2pdf").warn("python解释器路径不存在")
     ctx.scope.dispose()
   }
