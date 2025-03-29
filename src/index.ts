@@ -3,6 +3,7 @@ import { parseDocument } from 'yaml'
 import { spawn } from 'child_process'
 import { join } from 'path'
 import fs from 'fs'
+import {} from "@koishijs/plugin-notifier"
 
 export const name = 'jm2pdf'
 
@@ -53,11 +54,15 @@ export const Config: Schema<Config> = Schema.intersect([
   }).description("杂项")
 ])
 
+export const inject = ["notifier"]
+
 export function apply(ctx: Context, config: Config) {
   if (config.python && !fs.existsSync(config.python)) {
     ctx.logger("jm2pdf").warn("python解释器路径不存在")
-    ctx.scope.dispose()
+    ctx.notifier.create().update({type: "danger", content: "python解释器路径不存在"})
+    return
   }
+
   const cache = new Map()
   if (config.clearAtRestart) fs.rmSync(join(ctx.baseDir, `cache/jmcomic`), { recursive: true, force: true });
 
@@ -81,7 +86,7 @@ export function apply(ctx: Context, config: Config) {
       
       session.send(h.quote(session.messageId) + "正在下载...")
 
-      const pythonProcess = spawn('python', ["-u", join(__dirname, "./../image2pdf/main.py"), id.toString(), jmConfigPath])
+      const pythonProcess = spawn(config.python || 'python', ["-u", join(__dirname, "./../image2pdf/main.py"), id.toString(), jmConfigPath])
 
       pythonProcess.stdout.on("data", async (data: Buffer) => {
         const response = data.toString("utf-8").trim()
