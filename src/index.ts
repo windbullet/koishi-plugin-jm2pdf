@@ -1,6 +1,7 @@
 import { Context, Schema, h } from 'koishi'
 import { parseDocument } from 'yaml'
-import { spawn } from 'child_process'
+import { spawn, exec } from 'child_process'
+import { promisify } from 'util'
 import { join } from 'path'
 import fs from 'fs'
 import {} from "@koishijs/plugin-notifier"
@@ -56,13 +57,25 @@ export const Config: Schema<Config> = Schema.intersect([
 
 export const inject = ["notifier"]
 
-export function apply(ctx: Context, config: Config) {
+const execPromise = promisify(exec)
+
+export async function apply(ctx: Context, config: Config) {
+  const notifier = ctx.notifier.create()
+
   if (config.python && !fs.existsSync(config.python)) {
     ctx.logger("jm2pdf").warn("python解释器路径不存在")
-    ctx.notifier.create().update({type: "danger", content: "python解释器路径不存在"})
+    notifier.update({type: "danger", content: "python解释器路径不存在"})
     return
   }
 
+  try {
+    await execPromise(`${config.python || 'python'} -m pip install --upgrade -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple -r ${join(__dirname, "./../image2pdf/requirements.txt")}`)
+  } catch (e) {
+    ctx.logger("jm2pdf").warn("下载第三方库失败: " + e)
+    notifier.update({type: "danger", content: "下载第三方库失败：" + e})
+    return
+  }
+  
   const cache = new Map()
   if (config.clearAtRestart) fs.rmSync(join(ctx.baseDir, `cache/jmcomic`), { recursive: true, force: true });
 
