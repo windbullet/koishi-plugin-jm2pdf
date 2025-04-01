@@ -69,7 +69,7 @@ export async function apply(ctx: Context, config: Config) {
   }
 
   try {
-    await execPromise(`${config.python || 'python'} -m pip install --upgrade -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple -r ${join(__dirname, "./../image2pdf/requirements.txt")}`)
+    await execPromise(`${config.python || 'python'} -m pip install --upgrade --user -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple -r ${join(__dirname, "./../image2pdf/requirements.txt")}`)
   } catch (e) {
     ctx.logger("jm2pdf").warn("下载第三方库失败: " + e)
     notifier.update({type: "danger", content: "下载第三方库失败：" + e})
