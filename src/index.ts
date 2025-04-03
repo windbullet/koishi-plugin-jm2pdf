@@ -19,7 +19,7 @@ export interface Config {
   python: string
   proxy: string
   debug: boolean
-  break_system_package: boolean
+  break_system_packages: boolean
 }
 
 export const Config: Schema<Config> = Schema.intersect([
@@ -53,8 +53,8 @@ export const Config: Schema<Config> = Schema.intersect([
     debug: Schema.boolean()
       .description("调试模式，打印更多日志")
       .default(false),
-    break_system_package: Schema.boolean()
-      .description("是否使用 --break-system-package 参数下载第三方库")
+    break_system_packages: Schema.boolean()
+      .description("是否使用 --break-system-packages 参数下载第三方库")
       .default(false)
   }).description("杂项")
 ])
@@ -73,7 +73,7 @@ export async function apply(ctx: Context, config: Config) {
   }
 
   try {
-    await execPromise(`${config.python || 'python'} -m pip install --upgrade -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple -r ${join(__dirname, "./../image2pdf/requirements.txt")} ${config.break_system_package ? "--break-system-package" : ""}`)
+    await execPromise(`${config.python || 'python'} -m pip install --upgrade -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple -r ${join(__dirname, "./../image2pdf/requirements.txt")} ${config.break_system_packages ? "--break-system-packages" : ""}`)
   } catch (e) {
     ctx.logger("jm2pdf").warn("下载第三方库失败: " + e)
     notifier.update({type: "danger", content: "下载第三方库失败：" + e})
