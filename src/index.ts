@@ -65,6 +65,7 @@ const execPromise = promisify(exec)
 
 export async function apply(ctx: Context, config: Config) {
   const notifier = ctx.notifier.create()
+  const cacheDir = join(ctx.baseDir, `cache/jmcomic`)
 
   if (config.python && !fs.existsSync(config.python)) {
     ctx.logger("jm2pdf").warn("python解释器路径不存在")
@@ -79,13 +80,36 @@ export async function apply(ctx: Context, config: Config) {
     notifier.update({type: "danger", content: "下载第三方库失败：" + e})
     return
   }
-  
+
   const cache = new Map()
-  if (config.clearAtRestart) fs.rmSync(join(ctx.baseDir, `cache/jmcomic`), { recursive: true, force: true });
+
+  if (config.clearAtRestart) {
+    fs.rmSync(cacheDir, { recursive: true, force: true });
+  } else if (fs.existsSync(cacheDir)) {
+    const files = fs.readdirSync(cacheDir)
+
+    const filesWithStats = []
+    files.forEach(file => {
+      const filePath = join(cacheDir, file)
+      const stats = fs.statSync(filePath)
+      if (stats.isDirectory()) {
+        fs.rmSync(filePath, { recursive: true, force: true })
+      } else {
+        filesWithStats.push({
+          name: file,
+          createdAt: stats.birthtime
+        })
+      }
+    })
+
+    for (const file of filesWithStats.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())) {
+      cache.set(+file.name.match(/\((\d+)\) /)[1], file.name)
+    }
+  }
 
   const jmConfigPath = join(__dirname, "./../image2pdf/config.yml")
   const jmConfig = parseDocument(fs.readFileSync(jmConfigPath, "utf-8"))
-  jmConfig.setIn(["dir_rule", "base_dir"], join(ctx.baseDir, "cache/jmcomic"))
+  jmConfig.setIn(["dir_rule", "base_dir"], cacheDir)
   if (config.proxy) {
     jmConfig.setIn(["client", "postman", "meta_data", "proxies"], config.proxy)
   } else {
@@ -98,35 +122,51 @@ export async function apply(ctx: Context, config: Config) {
     .action(async ({session}, id) => {
       if (cache.get(id)) {
         await session.send(h.quote(session.messageId) + "已从缓存中找到，正在发送...")
-        return h.file(`file:///${join(ctx.baseDir, `cache/jmcomic/${cache.get(id)}`)}`)
+        return h.file(`file:///${join(cacheDir, cache.get(id))}`)
       }
       
       session.send(h.quote(session.messageId) + "正在下载...")
 
       const pythonProcess = spawn(config.python || 'python', ["-u", join(__dirname, "./../image2pdf/main.py"), id.toString(), jmConfigPath])
 
+      let success = false
       pythonProcess.stdout.on("data", async (data: Buffer) => {
         const response = data.toString("utf-8").trim()
         if (response.startsWith("result:")) {
+          success = true
           const pdf = JSON.parse(response.replace("result:", ""))
-          cache.set(id, pdf.name)
-          await session.send(h.file(`file:///${join(ctx.baseDir, `cache/jmcomic/${pdf.name}`)}`))
-          fs.rmSync(join(ctx.baseDir, `cache/jmcomic/${pdf.name.replace(".pdf", "").replace(/\(\d+\) /, "")}`), { recursive: true, force: true });
+
+          await session.send(h.file(`file:///${join(cacheDir, pdf.name)}`))
+
+          fs.rmSync(join(cacheDir, pdf.name.replace(".pdf", "").replace(/\(\d+\) /, "")), { recursive: true, force: true });
           if (!config.cache) {
-            fs.rmSync(join(ctx.baseDir, `cache/jmcomic`), { recursive: true, force: true });
-          } else if (config.maxCache !== 0 && cache.size > config.maxCache) {
-            const earliestCache = cache.entries().next()
-            cache.delete(earliestCache.value[0])
-            fs.rmSync(join(ctx.baseDir, `cache/jmcomic/${earliestCache.value[1]}`), { recursive: true, force: true });
+            fs.rmSync(cacheDir, { recursive: true, force: true });
+            return
+          } 
+
+          cache.set(id, pdf.name)
+          if (config.maxCache !== 0 && cache.size > config.maxCache) {
+            const cacheEntries = cache.entries()
+            const cacheSize = cache.size
+            for (let i = 0; i < cacheSize - config.maxCache; i++) {
+              const earliestCache = cacheEntries.next()
+              cache.delete(earliestCache.value[0])
+              fs.rmSync(join(cacheDir, earliestCache.value[1]), { recursive: true, force: true });
+            }
           }
         } else if (config.debug) {
           ctx.logger("jm2pdf").info(response)
         }
       })
 
-      pythonProcess.stderr.on("data", (data: Buffer) => {
+      pythonProcess.stderr.on("data", async (data: Buffer) => {
         if (config.debug) ctx.logger("jm2pdf").warn(data.toString("utf-8"))
-        return h.quote(session.messageId) + "下载时遇到错误，可能是网络问题或JM号不存在，使用调试模式查看更多日志信息"
+      })
+
+      pythonProcess.on("close", async () => {
+        if (!success) {
+          await session.send(h.quote(session.messageId) + "下载时遇到错误，可能是网络问题或JM号不存在，使用调试模式查看更多日志信息")
+        }
       })
     })
 }
