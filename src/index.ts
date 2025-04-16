@@ -16,10 +16,10 @@ export interface Config {
   cache: boolean
   maxCache?: number
   clearAtRestart?: boolean
+  fullName: boolean
   python: string
   proxy: string
   debug: boolean
-  break_system_packages: boolean
 }
 
 export const Config: Schema<Config> = Schema.intersect([
@@ -44,6 +44,9 @@ export const Config: Schema<Config> = Schema.intersect([
   ]),
 
   Schema.object({
+    fullName: Schema.boolean()
+      .description("发送的文件名是否为本子全名（否则仅JM号）")
+      .default(true),
     python: Schema.string()
       .description("指定python解释器可执行文件路径，空则使用环境变量")
       .default(""),
@@ -53,9 +56,6 @@ export const Config: Schema<Config> = Schema.intersect([
     debug: Schema.boolean()
       .description("调试模式，打印更多日志")
       .default(false),
-    break_system_packages: Schema.boolean()
-      .description("是否使用 --break-system-packages 参数下载第三方库")
-      .default(false)
   }).description("杂项")
 ])
 
@@ -65,16 +65,30 @@ const execPromise = promisify(exec)
 
 export async function apply(ctx: Context, config: Config) {
   const notifier = ctx.notifier.create()
-  const cacheDir = join(ctx.baseDir, `cache/jmcomic`)
+  notifier.update({type: "warning", content: "正在初始化..."})
 
-  if (config.python && !fs.existsSync(config.python)) {
+  const cacheDir = join(ctx.baseDir, `cache/jmcomic`)
+  let pythonPath = config.python
+
+  if (!pythonPath) {
+    try {
+      await execPromise(`python -m venv ${join(ctx.baseDir, `data/jmcomicVenv`)}`)
+      pythonPath = pythonPath = process.platform === 'win32'
+      ? join(ctx.baseDir, 'data/jmcomicVenv/Scripts/python')
+      : join(ctx.baseDir, 'data/jmcomicVenv/bin/python');
+    } catch (e) {
+      ctx.logger("jm2pdf").warn("创建python虚拟环境失败：" + e)
+      notifier.update({type: "danger", content: "创建python虚拟环境失败：" + e})
+      return
+    }
+  } else if (!fs.existsSync(config.python)) {
     ctx.logger("jm2pdf").warn("python解释器路径不存在")
     notifier.update({type: "danger", content: "python解释器路径不存在"})
     return
   }
 
   try {
-    await execPromise(`${config.python || 'python'} -m pip install --upgrade -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple -r ${join(__dirname, "./../image2pdf/requirements.txt")} ${config.break_system_packages ? "--break-system-packages" : ""}`)
+    await execPromise(`${pythonPath} -m pip install --upgrade -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple -r ${join(__dirname, "./../image2pdf/requirements.txt")}`)
   } catch (e) {
     ctx.logger("jm2pdf").warn("下载第三方库失败: " + e)
     notifier.update({type: "danger", content: "下载第三方库失败：" + e})
@@ -117,17 +131,19 @@ export async function apply(ctx: Context, config: Config) {
   }
   fs.writeFileSync(jmConfigPath, jmConfig.toString())
 
+  notifier.dispose()
+
   ctx.command("jmcomic <id:posint>", "通过JM号获取本子并发送pdf", {checkArgCount: true})
     .example("jmcomic 366517")
     .action(async ({session}, id) => {
       if (cache.get(id)) {
         await session.send(h.quote(session.messageId) + "已从缓存中找到，正在发送...")
-        return h.file(`file:///${join(cacheDir, cache.get(id))}`)
+        return h("file", {src: `file:///${join(cacheDir, cache.get(id))}`, title: config.fullName ? cache.get(id) : `${id}.pdf`})
       }
       
       session.send(h.quote(session.messageId) + "正在下载...")
 
-      const pythonProcess = spawn(config.python || 'python', ["-u", join(__dirname, "./../image2pdf/main.py"), id.toString(), jmConfigPath])
+      const pythonProcess = spawn(pythonPath, ["-u", join(__dirname, "./../image2pdf/main.py"), id.toString(), jmConfigPath])
 
       let success = false
       pythonProcess.stdout.on("data", async (data: Buffer) => {
@@ -136,7 +152,7 @@ export async function apply(ctx: Context, config: Config) {
           success = true
           const pdf = JSON.parse(response.replace("result:", ""))
 
-          await session.send(h.file(`file:///${join(cacheDir, pdf.name)}`))
+          await session.send(h("file", {src: `file:///${join(cacheDir, pdf.name)}`, title: config.fullName ? pdf.name : `${id}.pdf`}))
 
           fs.rmSync(join(cacheDir, pdf.name.replace(".pdf", "").replace(/\(\d+\) /, "")), { recursive: true, force: true });
           if (!config.cache) {
