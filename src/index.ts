@@ -10,7 +10,7 @@ export const name = 'jm2pdf'
 
 export const usage = `更新日志：https://forum.koishi.xyz/t/topic/10694  
 使用本插件需要安装Python  
-若未安装请在 https://www.python.org 安装并勾选“Add Python to PATH”`
+若未安装请在 https://www.python.org 安装并勾选“Add Python to PATH” 后重启电脑`
 
 export interface Config {
   cache: boolean
