@@ -5,6 +5,12 @@ import { promisify } from 'util'
 import { join } from 'path'
 import fs from 'fs'
 import {} from "@koishijs/plugin-notifier"
+import archiver, { ArchiverOptions } from 'archiver'
+try {
+  archiver.registerFormat('zip-encrypted', require("archiver-zip-encrypted"));
+} catch (e) {
+  
+}
 
 export const name = 'jm2pdf'
 
@@ -17,7 +23,10 @@ export interface Config {
   maxCache?: number
   clearAtRestart?: boolean
   fullName: boolean
+  fileFormat: "pdf" | "zip"
+  zipPassword?: string
   python: string
+  autoDownloadDependencies: boolean
   proxy: string
   debug: boolean
 }
@@ -47,9 +56,30 @@ export const Config: Schema<Config> = Schema.intersect([
     fullName: Schema.boolean()
       .description("发送的文件名是否为本子全名（否则仅JM号）")
       .default(true),
+    fileFormat: Schema.union([
+      Schema.const("pdf").description("发送PDF文件"),
+      Schema.const("zip").description("发送ZIP文件"),
+    ]).default("pdf").description("发送的文件格式"),
+  }).description("文件设置"),
+  Schema.union([
+    Schema.object({
+      fileFormat: Schema.const("zip").required(),
+      zipPassword: Schema.string()
+        .default("")
+        .description("ZIP文件的密码，空则不加密"),
+    }),
+    Schema.object({
+      fileFormat: Schema.const("pdf")
+    })
+  ]),
+
+  Schema.object({
     python: Schema.string()
       .description("指定python解释器可执行文件路径，空则使用环境变量")
       .default(""),
+    autoDownloadDependencies: Schema.boolean()
+      .description("是否自动下载需要的第三方库（jmcomic, pillow, pyyaml）")
+      .default(true),
     proxy: Schema.string()
       .description("代理服务器地址，空则不使用代理")
       .default(""),
@@ -73,7 +103,7 @@ export async function apply(ctx: Context, config: Config) {
   if (!pythonPath) {
     try {
       await execPromise(`python -m venv ${join(ctx.baseDir, `data/jmcomicVenv`)}`)
-      pythonPath = pythonPath = process.platform === 'win32'
+      pythonPath = process.platform === 'win32'
       ? join(ctx.baseDir, 'data/jmcomicVenv/Scripts/python')
       : join(ctx.baseDir, 'data/jmcomicVenv/bin/python');
     } catch (e) {
@@ -87,15 +117,17 @@ export async function apply(ctx: Context, config: Config) {
     return
   }
 
-  try {
-    await execPromise(`${pythonPath} -m pip install --upgrade -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple -r ${join(__dirname, "./../image2pdf/requirements.txt")}`)
-  } catch (e) {
-    ctx.logger("jm2pdf").warn("下载第三方库失败: " + e)
-    notifier.update({type: "danger", content: "下载第三方库失败：" + e})
-    return
+  if (config.autoDownloadDependencies) {
+    try {
+      await execPromise(`${pythonPath} -m pip install --upgrade -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple -r ${join(__dirname, "./../image2pdf/requirements.txt")}`)
+    } catch (e) {
+      ctx.logger("jm2pdf").warn("下载第三方库失败: " + e)
+      notifier.update({type: "danger", content: "下载第三方库失败：" + e})
+      return
+    }
   }
 
-  const cache = new Map()
+  const cache: Map<number, string> = new Map()
 
   if (config.clearAtRestart) {
     fs.rmSync(cacheDir, { recursive: true, force: true });
@@ -124,11 +156,7 @@ export async function apply(ctx: Context, config: Config) {
   const jmConfigPath = join(__dirname, "./../image2pdf/config.yml")
   const jmConfig = parseDocument(fs.readFileSync(jmConfigPath, "utf-8"))
   jmConfig.setIn(["dir_rule", "base_dir"], cacheDir)
-  if (config.proxy) {
-    jmConfig.setIn(["client", "postman", "meta_data", "proxies"], config.proxy)
-  } else {
-    jmConfig.setIn(["client", "postman", "meta_data", "proxies"], null)
-  }
+  jmConfig.setIn(["client", "postman", "meta_data", "proxies"], config.proxy || null)
   fs.writeFileSync(jmConfigPath, jmConfig.toString())
 
   notifier.dispose()
@@ -138,7 +166,15 @@ export async function apply(ctx: Context, config: Config) {
     .action(async ({session}, id) => {
       if (cache.get(id)) {
         await session.send(h.quote(session.messageId) + "已从缓存中找到，正在发送...")
-        return h("file", {src: `file:///${join(cacheDir, cache.get(id))}`, title: config.fullName ? cache.get(id) : `${id}.pdf`})
+        switch (config.fileFormat) {
+          case "pdf":
+            return h.file(`file:///${join(cacheDir, cache.get(id))}`, {title: config.fullName ? cache.get(id) : `${id}.pdf`})
+          case "zip":
+            await zip(join(cacheDir, cache.get(id)), join(cacheDir, `${id}.zip`), cache.get(id))
+            await session.send(h.file(`file:///${join(cacheDir, `${id}.zip`)}`, {title: config.fullName ? cache.get(id).replace(".pdf", ".zip") : `${id}.zip`}))
+            fs.unlinkSync(join(cacheDir, `${id}.zip`))
+            return
+        }
       }
       
       session.send(h.quote(session.messageId) + "正在下载...")
@@ -152,7 +188,16 @@ export async function apply(ctx: Context, config: Config) {
           success = true
           const pdf = JSON.parse(response.replace("result:", ""))
 
-          await session.send(h("file", {src: `file:///${join(cacheDir, pdf.name)}`, title: config.fullName ? pdf.name : `${id}.pdf`}))
+          switch (config.fileFormat) {
+            case "pdf":
+              await session.send(h.file(`file:///${join(cacheDir, pdf.name)}`, {title: config.fullName ? pdf.name : `${id}.pdf`}))
+              break
+            case "zip":
+              await zip(join(cacheDir, pdf.name), join(cacheDir, `${id}.zip`), pdf.name)
+              await session.send(h.file(`file:///${join(cacheDir, `${id}.zip`)}`, {title: config.fullName ? pdf.name.replace(".pdf", ".zip") : `${id}.zip`}))
+              fs.unlinkSync(join(cacheDir, `${id}.zip`))
+              break
+          }
 
           fs.rmSync(join(cacheDir, pdf.name.replace(".pdf", "").replace(/\(\d+\) /, "")), { recursive: true, force: true });
           if (!config.cache) {
@@ -185,4 +230,34 @@ export async function apply(ctx: Context, config: Config) {
         }
       })
     })
+
+  async function zip(inputPath: string, outputPath: string, fileName: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const output = fs.createWriteStream(outputPath)
+
+      let archive: archiver.Archiver
+      if (config.zipPassword) {
+        archive = archiver.create("zip-encrypted", {
+          encryptionMethod: "aes256",
+          password: config.zipPassword,
+        } as unknown as ArchiverOptions)
+      } else {
+        archive = archiver("zip")
+      }
+
+      output.on("close", () => {
+        resolve()
+      })
+
+      archive.on("error", (err: Error) => {
+        reject(err)
+      })
+  
+      archive.pipe(output)
+      archive.file(inputPath, { name: fileName })
+      archive.finalize()
+    })
+  }
 }
+
+
