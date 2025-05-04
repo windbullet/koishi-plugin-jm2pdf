@@ -6,11 +6,9 @@ import { join } from 'path'
 import fs from 'fs'
 import {} from "@koishijs/plugin-notifier"
 import archiver, { ArchiverOptions } from 'archiver'
-try {
+if (!archiver.isRegisteredFormat('zip-encrypted')) {
   archiver.registerFormat('zip-encrypted', require("archiver-zip-encrypted"));
-} catch (e) {
-  
-}
+} 
 
 export const name = 'jm2pdf'
 
@@ -172,6 +170,7 @@ export async function apply(ctx: Context, config: Config) {
           case "zip":
             await zip(join(cacheDir, cache.get(id)), join(cacheDir, `${id}.zip`), cache.get(id))
             await session.send(h.file(`file:///${join(cacheDir, `${id}.zip`)}`, {title: config.fullName ? cache.get(id).replace(".pdf", ".zip") : `${id}.zip`}))
+            await session.send(`解压密码：${config.zipPassword}`)
             fs.unlinkSync(join(cacheDir, `${id}.zip`))
             return
         }
@@ -195,6 +194,7 @@ export async function apply(ctx: Context, config: Config) {
             case "zip":
               await zip(join(cacheDir, pdf.name), join(cacheDir, `${id}.zip`), pdf.name)
               await session.send(h.file(`file:///${join(cacheDir, `${id}.zip`)}`, {title: config.fullName ? pdf.name.replace(".pdf", ".zip") : `${id}.zip`}))
+              await session.send(`解压密码：${config.zipPassword}`)
               fs.unlinkSync(join(cacheDir, `${id}.zip`))
               break
           }
