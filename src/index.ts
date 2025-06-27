@@ -6,6 +6,7 @@ import { join } from 'path'
 import fs from 'fs'
 import {} from "@koishijs/plugin-notifier"
 import archiver, { ArchiverOptions } from 'archiver'
+import { pathToFileURL } from 'url'
 if (!archiver.isRegisteredFormat('zip-encrypted')) {
   archiver.registerFormat('zip-encrypted', require("archiver-zip-encrypted"));
 } 
@@ -166,10 +167,10 @@ export async function apply(ctx: Context, config: Config) {
         await session.send(h.quote(session.messageId) + "已从缓存中找到，正在发送...")
         switch (config.fileFormat) {
           case "pdf":
-            return h.file(`file:///${join(cacheDir, cache.get(id))}`, {title: config.fullName ? cache.get(id) : `${id}.pdf`})
+            return h.file(pathToFileURL(join(cacheDir, cache.get(id))).href, {title: config.fullName ? cache.get(id) : `${id}.pdf`})
           case "zip":
             await zip(join(cacheDir, cache.get(id)), join(cacheDir, `${id}.zip`), cache.get(id))
-            await session.send(h.file(`file:///${join(cacheDir, `${id}.zip`)}`, {title: config.fullName ? cache.get(id).replace(".pdf", ".zip") : `${id}.zip`}))
+            await session.send(h.file(pathToFileURL(join(cacheDir, `${id}.zip`)).href, {title: config.fullName ? cache.get(id).replace(".pdf", ".zip") : `${id}.zip`}))
             config.zipPassword && await session.send(`解压密码：${config.zipPassword}`)
             fs.unlinkSync(join(cacheDir, `${id}.zip`))
             return
@@ -189,11 +190,11 @@ export async function apply(ctx: Context, config: Config) {
 
           switch (config.fileFormat) {
             case "pdf":
-              await session.send(h.file(`file:///${join(cacheDir, pdf.name)}`, {title: config.fullName ? pdf.name : `${id}.pdf`}))
+              await session.send(h.file(pathToFileURL(join(cacheDir, pdf.name)).href, {title: config.fullName ? pdf.name : `${id}.pdf`}))
               break
             case "zip":
               await zip(join(cacheDir, pdf.name), join(cacheDir, `${id}.zip`), pdf.name)
-              await session.send(h.file(`file:///${join(cacheDir, `${id}.zip`)}`, {title: config.fullName ? pdf.name.replace(".pdf", ".zip") : `${id}.zip`}))
+              await session.send(h.file(pathToFileURL(join(cacheDir, `${id}.zip`)).href, {title: config.fullName ? pdf.name.replace(".pdf", ".zip") : `${id}.zip`}))
               config.zipPassword && await session.send(`解压密码：${config.zipPassword}`)
               fs.unlinkSync(join(cacheDir, `${id}.zip`))
               break
